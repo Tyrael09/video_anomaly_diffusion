@@ -18,10 +18,17 @@ def compute_eval_outs_aot(accelerator, sample_fn, dl):
     idx = []
 
     for batch in tqdm(dl, disable=not accelerator.is_main_process):
-        feat = batch['data']
-        y = batch['label']
-        vid = batch['vid_id']
-        i = batch['idx']
+        '''
+        batch is a list containing: 
+        the feature tensor at i=0, which is the data input, 
+        the label tensor at i=1, which is 0 for normal images and 1 for abnormal, 
+        the vid_id at i=2, which is the string name of the video, and
+        the idx at i=3, which is the ID of the clip.
+        '''
+        feat = batch[0] # batch['data'] # TODO fix this 
+        y = batch[1] # batch['label']
+        vid = batch[2] # batch['vid_id']
+        i = batch[3] # batch['idx']
 
         g_dists = sample_fn(feat)
         g_dists = accelerator.gather(g_dists)

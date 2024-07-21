@@ -26,6 +26,7 @@ class ClipDataset(torch.utils.data.Dataset):
                  anomaly=False,
                  preload=False,
                  hd5=False,
+                 normals=False,
                  ):
 
         assert split in ['test', 'train'], 'split type can be train or test'
@@ -53,7 +54,7 @@ class ClipDataset(torch.utils.data.Dataset):
         else:
             self.load_clip = self.load_clip_frames
         # labelled header load
-        self.header_df = pd.read_csv(self.header_dir + f'/splits_header_{split}.csv')
+        self.header_df = pd.read_csv(self.header_dir + f'/header_{split}.csv') # was f'/splits_header_{split}.csv')
 
         if no_overlap:
             indexes = self.header_df['stride'] == 0
@@ -141,8 +142,8 @@ class ClipDataset(torch.utils.data.Dataset):
             clip = self.data[idx]
         else:
             # feat_path = f'{self.dir_name}/{self.feat_model}/{video_id}/{start}.npy'
-            feat_path = f'{self.dir_name}/features3D/{self.feat_model}/{video_id}/{start}.npy'
-            # feat_path = f'{self.dir_name}/features/{self.feat_model}/{video_id}/{start}.npy'
+            # feat_path = f'{self.dir_name}/features3D/{self.feat_model}/{video_id}/{start}.npy' # TODO CHANGE BACK IF NECESSARY!!!
+            feat_path = f'{self.dir_name}/features/r3D18_train/{video_id}/{start}.npy' # adjust "...r3D18_test/train" - maybe just remove train/test and rename files to avoid errors?
             clip = np.load(feat_path)
 
         return clip, label, video_id, start

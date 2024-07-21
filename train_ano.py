@@ -24,6 +24,7 @@ from torchmetrics.functional import auroc, accuracy, precision, f1_score
 import random
 import numpy as np
 
+from autoencoder.feat_models import GCLModel, Autoencoder, Discriminator
 
 def seed_everything(seed=42):
     np.random.seed(seed)
@@ -48,9 +49,9 @@ def args_parser():
                    help='the batch size')
     p.add_argument('--config', type=str, required=True,
                    help='the configuration file')
-    p.add_argument('--n_epochs', type=int, default=10,
+    p.add_argument('--n_epochs', type=int, default=401, # default=10
                    help='number of epoch')
-    p.add_argument('--evaluate', action='store_true', default=True,
+    p.add_argument('--evaluate', action='store_true', default=False, # default=True
                    help='evaluate step switcher')
     p.add_argument('--gns', action='store_true',
                    help='measure the gradient noise scale (DDP only)')
@@ -104,8 +105,8 @@ def main_objective(config_tune, args):
 
     if dataset_config['type'] == 'clips':
         from custom_datasets import feature_dataset
-        dataset_root: str = 'data/'
-        dataset_name: str = 'shanghai'
+        dataset_root: str = '/local/scratch/Cataract-1K-Hendrik/regular_videos_long/'
+        dataset_name: str = 'train'
         # feat_models_3D = ['rx101', 'r3d18', 'r3d50']
         train_set = feature_dataset.ClipDataset(
             dataset_root + dataset_name,
@@ -115,6 +116,7 @@ def main_objective(config_tune, args):
             clean=False,
             normals=False,  # to train ooc setting
         )
+        '''
         test_set = feature_dataset.ClipDataset(
             dataset_root + dataset_name,
             clip_len=16,
@@ -122,10 +124,11 @@ def main_objective(config_tune, args):
             split='test',
             clean=False,
         )
+        '''
     else:
         raise ValueError('Invalid dataset type')
 
-    feat, label = train_set[0]
+    feat, label, _, _= train_set[0] # hacky output dimension fix, but seems to works
     feat_size = feat.shape[-1]
 
     if model_config['input_size'] != feat_size:
@@ -146,7 +149,7 @@ def main_objective(config_tune, args):
 
 
     # inner_model = K.config.make_model_aot(config)
-    gcl_model = K.models.GCLModel(
+    gcl_model = K.models.GVADModel( # TODO fix this - used to be K.models.GCLModel(feat_size)
         feat_size,
     )
     if accelerator.is_main_process:
@@ -210,12 +213,20 @@ def main_objective(config_tune, args):
     train_dl = data.DataLoader(train_set, args.batch_size, shuffle=True, drop_last=True,
                                num_workers=args.num_workers, persistent_workers=True)
 
-    test_dl = data.DataLoader(test_set, args.batch_size, shuffle=True, drop_last=False,
-                              num_workers=args.num_workers, persistent_workers=True)
-
+    # test_dl = data.DataLoader(test_set, args.batch_size, shuffle=True, drop_last=False,
+    #                          num_workers=args.num_workers, persistent_workers=True)
+    # TODO UNCOMMENT IF NECESSARY!!
 
     model, opt, train_dl = accelerator.prepare(gcl_model, opt, train_dl)
-    inner_model = model.ae
+    inner_model = model.ae # gcl_model.ae, which is currently:
+    '''class GVADModel(nn.Module):
+    def __init__(self,
+                 feat_size,):
+        super(GVADModel, self).__init__()
+        self.ae = FeatureDenoiserModel(feat_size)
+    '''
+    # therefore inner_model = FeatureDenoiserModel(feat_size), which doesn't have a loss attribute!
+    # use "outer" model (i.e. GVADModel.loss) instead??
     if args.gns:
         gns_stats_hook = K.gns.DDPGradientStatsHook(model)
         gns_stats = K.gns.GradientNoiseScale()
@@ -225,8 +236,9 @@ def main_objective(config_tune, args):
     sigma_max = model_config['sigma_max']
     sample_density = K.config.make_sample_density(model_config)
 
-    model_denoiser = K.config.make_denoiser_wrapper(config)(inner_model)
-    model_ema = deepcopy(model_denoiser)
+    # changing model_denoiser to "gcl_model" seems to cause parameter size issues with ema_update(gcl_model, averaged_model)
+    model_denoiser = K.config.make_denoiser_wrapper(config)(gcl_model) # was ...(inner_model), but FeatureDenoiserModel has no attribute "loss"
+    model_ema = deepcopy(model_denoiser) # instance of FeatureDenoiserWrapper(gcl_model)
 
     epoch = 0
     step = 0
@@ -234,7 +246,7 @@ def main_objective(config_tune, args):
     evaluate_enabled = args.evaluate
     if evaluate_enabled:
         test_size = len(test_set)
-        if accelerator.is_main_process:
+    if accelerator.is_main_process: # changed indent so block below isn't conditional on evaluate_enabled being "True"
             metrics_log = K.utils.CSVLogger(f'{args.name}_metrics.csv', ['step', 'acc', 'auc', 'precision', 'f1'])
             loss_log = K.utils.CSVLogger(f'{args.name}_loss.csv', ['step', 'loss'])
 
@@ -282,6 +294,8 @@ def main_objective(config_tune, args):
         evaluate()
 
     try:
+        save_dir = "checkpoints_2"
+        os.makedirs(save_dir, exist_ok=True)
         for i in range(args.n_epochs):
             for batch in tqdm(train_dl, disable=not accelerator.is_main_process):
                 with accelerator.accumulate(model):
@@ -299,16 +313,19 @@ def main_objective(config_tune, args):
                     opt.step()
                     sched.step()
                     opt.zero_grad()
-                    if accelerator.sync_gradients:
+                    if False: # "accelerator.sync_gradients:" - changed condition to avoid ema_update()
                         ema_decay = ema_sched.get_value()
-                        K.utils.ema_update(model, model_ema, ema_decay)
+
+                        # try without ema
+                        # model = GVADModel, model_ema = deepcopy(K.config.make_denoiser_wrapper(config)(gcl_model))
+                        K.utils.ema_update(model, model_ema, ema_decay) # model_params.keys() != averaged_params.keys(), causing error!!
                         ema_sched.step()
 
                 if accelerator.is_main_process:
                     writer.add_scalar('Epoch/train', epoch, step)
                     writer.add_scalar('Loss/train', loss.item(), step)
                     writer.add_scalar('Lr/train', sched.get_last_lr()[0], step)
-                    writer.add_scalar('ema_decay/train', ema_decay, step)
+                    # writer.add_scalar('ema_decay/train', ema_decay, step) # re,pvomg all EMA
 
                     if step % 25 == 0:
                         if args.gns:
@@ -320,14 +337,30 @@ def main_objective(config_tune, args):
 
                 step += 1
             loss_log.write(step, loss.item())
-            preds_acc, preds_auc, preds_prec, preds_f1 = evaluate()
+            # line below causing issues because evaluet() is Null
+            # preds_acc, preds_auc, preds_prec, preds_f1 = evaluate()
+
+            if epoch % 10 == 0:
+                # Inside your training loop, after training
+                #save_dir = "checkpoints_2"
+                #os.makedirs(save_dir, exist_ok=True)
+
+                model_save_path = os.path.join(save_dir, f"model_epoch_{epoch}.pth")
+                torch.save({
+                    'model': gcl_model.state_dict(),
+                    'model_ema': model_ema.state_dict(),
+                    'opt': opt.state_dict(),
+                    'sched': sched.state_dict(),
+                    'ema_sched': ema_sched.state_dict(),
+                }, model_save_path)
+
 
             epoch += 1
     except KeyboardInterrupt:
         pass
 
 
-def main_param_search(num_samples=200, n_epochs=30):
+def main_param_search(num_samples=200, n_epochs=401):
     args = args_parser()
     args.n_epochs = n_epochs
     seed_everything(seed=68)
@@ -347,7 +380,7 @@ def main_param_search(num_samples=200, n_epochs=30):
         main_objective(config, args)
 
 
-def main(n_epochs=30):
+def main(n_epochs=401):
     args = args_parser()
     args.n_epochs = n_epochs
     seed_everything(seed=68)

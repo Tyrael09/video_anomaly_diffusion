@@ -59,13 +59,26 @@ def args_parser():
     return p.parse_args()
 
 
-def get_datasets():
-    from feat_load import ClipDataset
-    
+def get_datasets(dataset_config):
+    # from feat_load import ClipDataset
+    '''
     test_set = ClipDataset(
         root_dir='data',
         dataset_name='shanghai',
         )
+    '''
+
+    from custom_datasets import feature_dataset
+    dataset_root: str = '/local/scratch/Cataract-1K-Hendrik/'
+    dataset_name: str = 'irregular_videos'
+    # feat_models_3D = ['rx101', 'r3d18', 'r3d50']
+    test_set = feature_dataset.ClipDataset(
+        dataset_root + dataset_name,
+        clip_len=16,
+        feat_model=dataset_config['feat_model'],
+        split='test',
+        clean=False,
+    )
     
     return test_set
 
@@ -78,13 +91,14 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = True
 
 
-    config = K.config.load_config(open('configs/config_ano.json'))
+    config = K.config.load_config(open('/gris/gris-f/homestud/heschwee/video_anomaly_diffusion/configs/my_config.json'))
     model_config = config['model']
     opt_config = config['optimizer']
     sched_config = config['lr_sched']
     ema_sched_config = config['ema_sched']
     feat_size = model_config['input_size']
-    test_set = get_datasets()
+    dataset_config = config['dataset']
+    test_set = get_datasets(dataset_config)
     
 
     if model_config["sampler"] == "lms":
@@ -170,16 +184,35 @@ def main():
     model = K.config.make_denoiser_wrapper(config)(model)
     model_ema = deepcopy(model)
 
-    ckpt_path = 'trained_model/model.pth'
+    ckpt_path = '/gris/gris-f/homestud/heschwee/video_anomaly_diffusion/checkpoints/model_epoch_90.pth'
     if Path(ckpt_path).exists():
         if accelerator.is_main_process:
             print(f'Resuming from {ckpt_path}...')
         ckpt = torch.load(ckpt_path, map_location='cpu')
-        accelerator.unwrap_model(model.gvad_model).load_state_dict(ckpt['model'])
-        accelerator.unwrap_model(model_ema.gvad_model).load_state_dict(ckpt['model_ema'])
-        opt.load_state_dict(ckpt['opt'])
-        sched.load_state_dict(ckpt['sched'])
-        ema_sched.load_state_dict(ckpt['ema_sched'])
+            
+        # Load the state dictionaries
+        model_state_dict = ckpt['model']
+        model_ema_state_dict = ckpt['model_ema']
+        opt_state_dict = ckpt['opt']
+        sched_state_dict = ckpt['sched']
+        ema_sched_state_dict = ckpt['ema_sched']
+        
+        # Add the 'gvad_model.' prefix to the keys in the state dictionaries
+        def add_prefix(state_dict, prefix):
+            return {prefix + k: v for k, v in state_dict.items()}
+        
+        #model_state_dict = add_prefix(model_state_dict, 'gvad_model.')
+        #model_ema_state_dict = add_prefix(model_ema_state_dict, 'gvad_model.')
+        
+        # Load the state dictionaries into the models
+        accelerator.unwrap_model(gvad_model).load_state_dict(model_state_dict)
+        accelerator.unwrap_model(model_ema).load_state_dict(model_ema_state_dict)
+        
+        # Load the optimizer and schedulers
+        opt.load_state_dict(opt_state_dict)
+        sched.load_state_dict(sched_state_dict)
+        ema_sched.load_state_dict(ema_sched_state_dict)
+        
         del ckpt
     else:
         print('state path does not exist.')
@@ -191,7 +224,7 @@ def main():
         g_dist = K.utils.normalize(g_dist)
         uniques = np.unique(vids)
         for item in uniques:
-            v_path = f'plots/{item}'
+            v_path = f'plots/irregular/{item}' # TODO change path for regular videos
             K.utils.mkdir(v_path)
             mask = np.where(vids == item)[0]
             sort_idx = np.argsort(idx[mask])
