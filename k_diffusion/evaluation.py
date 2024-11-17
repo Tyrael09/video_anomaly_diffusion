@@ -18,17 +18,17 @@ def compute_eval_outs_aot(accelerator, sample_fn, dl):
     idx = []
 
     for batch in tqdm(dl, disable=not accelerator.is_main_process):
-        '''
-        batch is a list containing: 
-        the feature tensor at i=0, which is the data input, 
-        the label tensor at i=1, which is 0 for normal images and 1 for abnormal, 
+        """
+        batch is a list containing:
+        the feature tensor at i=0, which is the data input,
+        the label tensor at i=1, which is 0 for normal images and 1 for abnormal,
         the vid_id at i=2, which is the string name of the video, and
         the idx at i=3, which is the ID of the clip.
-        '''
-        feat = batch[0] # batch['data'] # TODO fix this 
-        y = batch[1] # batch['label']
-        vid = batch[2] # batch['vid_id']
-        i = batch[3] # batch['idx']
+        """
+        feat = batch[0]  # batch['data']
+        y = batch[1]  # batch['label']
+        vid = batch[2]  # batch['vid_id']
+        i = batch[3]  # batch['idx']
 
         g_dists = sample_fn(feat)
         g_dists = accelerator.gather(g_dists)
@@ -37,13 +37,11 @@ def compute_eval_outs_aot(accelerator, sample_fn, dl):
         labels.append(y)
         video_id.append(vid)
         idx.append(i)
-        
+
     labels = torch.cat(labels)
     g_dists = torch.cat(outputs)
     idx = torch.cat(idx)
     return g_dists, labels, video_id, idx
-
-
 
 
 def polynomial_kernel(x, y):
@@ -73,8 +71,8 @@ def kid(x, y, max_size=5000):
     n_partitions = math.ceil(max(x_size / max_size, y_size / max_size))
     total_mmd = x.new_zeros([])
     for i in range(n_partitions):
-        cur_x = x[round(i * x_size / n_partitions):round((i + 1) * x_size / n_partitions)]
-        cur_y = y[round(i * y_size / n_partitions):round((i + 1) * y_size / n_partitions)]
+        cur_x = x[round(i * x_size / n_partitions) : round((i + 1) * x_size / n_partitions)]
+        cur_y = y[round(i * y_size / n_partitions) : round((i + 1) * y_size / n_partitions)]
         total_mmd = total_mmd + squared_mmd(cur_x, cur_y)
     return total_mmd / n_partitions
 
@@ -96,9 +94,9 @@ class _MatrixSquareRootEig(torch.autograd.Function):
 
 def sqrtm_eig(a):
     if a.ndim < 2:
-        raise RuntimeError('tensor of matrices must have at least 2 dimensions')
+        raise RuntimeError("tensor of matrices must have at least 2 dimensions")
     if a.shape[-2] != a.shape[-1]:
-        raise RuntimeError('tensor must be batches of square matrices')
+        raise RuntimeError("tensor must be batches of square matrices")
     return _MatrixSquareRootEig.apply(a)
 
 
