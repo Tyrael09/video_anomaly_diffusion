@@ -13,7 +13,10 @@ autoencoder/csv_transformations/
 autoencoder/runs/
 runs/*/*
 runs*
+runs
 *events.out.tfevents*
 !vad_test_set.csv
 !vad_train_set.csv
 plots_2*
+plots_3*
+.vscode

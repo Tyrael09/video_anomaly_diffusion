@@ -154,7 +154,7 @@ def main():
     model = K.config.make_denoiser_wrapper(config)(model)
     model_ema = deepcopy(model)
 
-    ckpt_path = "/gris/gris-f/homestud/heschwee/video_anomaly_diffusion/checkpoints_6/model_epoch_100.pth"  # TODO: Change to current version. Dont' forget to change "checkpoints_n" folder name if necessary.
+    ckpt_path = "/gris/gris-f/homestud/heschwee/video_anomaly_diffusion/checkpoints_7/model_epoch_100.pth"  # TODO: Change to current version. Dont' forget to change "checkpoints_n" folder name if necessary.
     if Path(ckpt_path).exists():
         if accelerator.is_main_process:
             print(f"Resuming from {ckpt_path}...")
@@ -198,8 +198,8 @@ def main():
         uniques = np.unique(vids)
 
         for item in uniques:
-            v_path = f"plots_2/{item}"
-            K.utils.mkdir("plots_2")
+            v_path = f"plots_3/{item}"
+            K.utils.mkdir("plots_3")
             mask = np.where(vids == item)[0]
             sort_idx = np.argsort(idx[mask])
 
@@ -266,7 +266,7 @@ def main():
         plt.title("Receiver Operating Characteristic (ROC) Curve")
         plt.legend(loc="lower right")
         plt.grid()
-        plt.savefig(f"plots_2/{i}_roc_curve.png", dpi=300, bbox_inches="tight")
+        plt.savefig(f"plots_3/{i}_roc_curve.png", dpi=300, bbox_inches="tight")
         plt.close()
 
     @torch.no_grad()
@@ -308,7 +308,7 @@ def main():
         df = pd.DataFrame([metrics])  # Wrap in a list to create a single-row DataFrame
 
         # Save to CSV (append if file exists)
-        csv_path = f"metrics_new_2.csv"
+        csv_path = f"metrics_new_3.csv"
         df.to_csv(csv_path, mode="a", index=False, header=not pd.io.common.file_exists(csv_path))
 
         vid = np.concatenate(vid)

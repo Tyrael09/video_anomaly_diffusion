@@ -35,7 +35,7 @@ def get_dis_thresh(dis_pred):
 
 def args_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--batch-size", type=int, default=2048, help="batch size")
+    p.add_argument("--batch-size", type=int, default=32, help="batch size")
     p.add_argument("--config", type=str, required=True, help="the configuration file")
     p.add_argument("--n_epochs", type=int, default=101, help="number of epoch")
     p.add_argument("--evaluate", action="store_true", default=True, help="evaluate step switcher")  # default=True
@@ -93,7 +93,6 @@ def main_objective(config_tune, args):
             clip_len=16,
             feat_model=dataset_config["feat_model"],
             split="test",
-            clean=False,
         )
     else:
         raise ValueError("Invalid dataset type")
@@ -224,8 +223,8 @@ def main_objective(config_tune, args):
         if (
             accelerator.is_main_process
         ):  # changed indent so block below isn't conditional on evaluate_enabled being "True"
-            metrics_log = K.utils.CSVLogger(f"{args.name}_metrics.csv", ["step", "acc", "auc", "precision", "f1"])
-            loss_log = K.utils.CSVLogger(f"{args.name}_loss.csv", ["step", "loss"])
+            metrics_log = K.utils.CSVLogger(f"{args.name}_metrics_2.csv", ["step", "acc", "auc", "precision", "f1"])
+            loss_log = K.utils.CSVLogger(f"{args.name}_loss_2.csv", ["step", "loss"])
 
     @torch.no_grad()
     @K.utils.eval_mode(model_ema)
@@ -246,10 +245,12 @@ def main_objective(config_tune, args):
 
         gen_preds, labels, _, _ = K.evaluation.compute_eval_outs_aot(accelerator, sample_fn, test_dl)
         if accelerator.is_main_process:
-            preds_auc = auroc(gen_preds, labels)
-            preds_acc = accuracy(gen_preds, labels) * 100
-            preds_prec = precision(gen_preds, labels) * 100
-            preds_f1 = f1_score(gen_preds, labels)
+            gen_preds = gen_preds[:, 0].cpu()
+            labels = labels.cpu()
+            preds_auc = auroc(gen_preds, labels, task="binary")
+            preds_acc = accuracy(gen_preds, labels, task="binary") * 100
+            preds_prec = precision(gen_preds, labels, task="binary") * 100
+            preds_f1 = f1_score(gen_preds, labels, task="binary")
             print(
                 f"acc: {preds_acc.item():g}, auc: {preds_auc.item():g}, precision: {preds_prec.item():g}, f1: {preds_f1.item():g}"
             )
